@@ -8,30 +8,35 @@ env.getMaxNumActions = function() { return COLLUMNS; }
 
 
 const CANVASWIDTH = 1500;
-const CANVASHEIGHT = 1000;
+const CANVASHEIGHT = 500;
 const BIRDPOSX = 30;
 const BIRDINITPOSY = CANVASHEIGHT / 2;
-const TIMEBETWEENPILLARS = 2500;
+const TIMEBETWEENPILLARS = 3500;
 const SIZEPASSAGE = 200;
-const MINMAXSIZEPILLAR = -1000;
+const MINMAXSIZEPILLAR = 100;
 const BIRDJUMPHEIGHT = 100;
-const BIRDDROPRATE = 2.5;
+const BIRDDROPRATE = 3.5;
 const BIRDDROPTIMEOUT = 10;
 const BIRDROTATEVALUE = 30;
 const BIRDROTATEENDTIME = 150;
 const BIRDSCALE = 0.15;
-const PILLARSCALE = 1;
+const BIRDROTATEVELOCITYBASE = 2;
+const BIRDJUMPVELOCITYBASE = 5;
+const PILLARSCALE = 1.5;
 const PILLARHEIGHT = 410;
-const PILLARWIDTH = 150;
+const PILLARWIDTH = 89 * PILLARSCALE;
+
+// Display options
+const DISPLAYLOSTANIMATION = true;
 
 
-let pillarsSpeed = 3.5;
+let pillarsSpeed = 5.5;
 let x = CANVASWIDTH;
 
 class EventHandler {
-    constructor(bird) {
+    constructor(game, bird) {
         document.addEventListener('keydown', (key) => {
-            if (key.code == "Space") { // if space key is pressed
+            if (key.code == "Space" && !game.lost) { // if space key is pressed and game isn't lost
                 bird.jump();
             }
         });
@@ -43,11 +48,14 @@ class Bird {
         this.x = BIRDPOSX;
         this.y = BIRDINITPOSY;
         this.baseWidth = img.width * BIRDSCALE;
-        this.width = img.width * BIRDSCALE - 5;
-        this.height = img.height * BIRDSCALE;
-        this.velocity = 0;
+        this.width = img.width * BIRDSCALE - 10;
+        this.heightDown = img.height * BIRDSCALE;
+        this.heightUp = 0;
+        this.jumpVelocity = BIRDJUMPVELOCITYBASE;
+        this.rotateVelocity = BIRDROTATEVELOCITYBASE;
         this.rotation = 0;
-        this.rotateEndTimeout;
+        this.rotateInterval;
+        this.birdJumpInterval;
         this.birdImage = img;
         this.konvaBird;
         this.sizeWhenRotate = 30;
@@ -56,26 +64,38 @@ class Bird {
         this.drop();
     }
     jump() {
-        clearTimeout(this.rotateEndTimeout);
+        clearInterval(this.rotateInterval);
+        clearInterval(this.birdJumpInterval);
         this.setRotation(-BIRDROTATEVALUE);
-        this.velocity = 5;
+        this.jumpVelocity = BIRDJUMPVELOCITYBASE;
+        this.heightUp = 30;
+        this.heightDown = 20;
         let jumpHeight = 0;
-        let birdJumpInterval = setInterval(() => {
+        this.birdJumpInterval = setInterval(() => {
             if (jumpHeight >= BIRDJUMPHEIGHT) {
-                this.rotateEndTimeout = setTimeout(() => {
-                    this.setRotation(0);
-                    this.rotateEndTimeout = setTimeout(() => {
-                        this.setRotation(BIRDROTATEVALUE);
-                    }, BIRDROTATEENDTIME);
-                }, BIRDROTATEENDTIME);
-                clearInterval(birdJumpInterval);
+                this.startRotationDown();
+                clearInterval(this.birdJumpInterval);
             }
-            let frameJumpSize = this.velocity + BIRDDROPRATE;
+            let frameJumpSize = this.jumpVelocity + BIRDDROPRATE;
+            this.jumpVelocity -= 0.2;
             if (this.y > this.sizeWhenRotate) {
                 this.y -= frameJumpSize;
             }
             jumpHeight += frameJumpSize;
         }, 5);
+    }
+    startRotationDown() {
+        this.rotateVelocity = BIRDROTATEVELOCITYBASE;
+        let refThis = this;
+        this.rotateInterval = setInterval(() => {
+            if (refThis.rotation >= BIRDROTATEVALUE) {
+                clearInterval(refThis.rotateInterval);
+            }
+            refThis.rotation += refThis.rotateVelocity;
+            refThis.rotateVelocity += 0.1;
+            refThis.heightUp -= refThis.rotateVelocity / 2;
+            refThis.heightDown += refThis.rotateVelocity / 2;
+        }, 0);
     }
     setRotation(rotation) {
         this.rotation = rotation;
@@ -155,6 +175,12 @@ class KonvaHandler {
         this.pillarsAnimation.start();
         this.animateBird.start();
     }
+    stopAnimatePillars() {
+        this.pillarsAnimation.stop();
+    }
+    restartAnimatePillars() {
+        this.pillarsAnimation.start();
+    }
     removePillars(pillars) {
         pillars.konvas.forEach(cell => {
             this.layerPillars.remove(cell);
@@ -169,7 +195,7 @@ class Pillar {
         this.x = CANVASWIDTH;
         this.yTop;
         this.width = PILLARWIDTH;
-        this.pillarTopHeight = imgTop.height;
+        this.pillarTopHeight = imgTop.height * PILLARSCALE;
         
         this.generateYTop();
         this.konvas = this.generateKonva(imgTop, imgBottom);
@@ -261,6 +287,8 @@ class ImageLoader {
 class Game {
     constructor() {
 		this.score = 0;
+        this.lost = false;
+        this.resetted = false;
 		this.scoreUpdated = false;
         this.eventHandler;
         this.konvaHandler = new KonvaHandler();
@@ -284,7 +312,7 @@ class Game {
         this.pillarBottom = images[2];
         this.pillars = new Pillars(this.pillarTop, this.pillarBottom);
         this.bird = new Bird(this.imgBird, this);
-        this.eventHandler = new EventHandler(this.bird);
+        this.eventHandler = new EventHandler(this, this.bird);
 
         this.pillars.createNewPillars(); // create the two first pillars
         this.konvaHandler.drawNewPillars(this.pillars.getLast());
@@ -304,14 +332,41 @@ class Game {
         }, TIMEBETWEENPILLARS);
     }
     reset() {
-		this.bird = new Bird(this.imgBird, this);
-		for (let index = 0; index < this.pillars.length(); index++) {
-			this.konvaHandler.removePillars(this.pillars.getFirst());
-		}
-		//this.konvaHandler.clearPillars();
-		this.pillars.reset();
+        this.resetted = true;
+        this.lost = false;
+        this.score = 0;
+        this.updateTextScore();
+
+        console.log("hey");
+
+        this.bird = new Bird(this.imgBird, this);
+        // for (let index = 0; index < this.pillars.length(); index++) {
+        //     this.konvaHandler.removePillars(this.pillars.getFirst());
+        // }
+        this.konvaHandler.clearPillars();
+        this.konvaHandler.restartAnimatePillars();
+        this.pillars.reset();
         this.pillars.createNewPillars();
         this.konvaHandler.drawNewPillars(this.pillars.getLast());
+    }
+    handleLost() {
+        let refThis = this;
+        this.lost = true;
+        this.konvaHandler.stopAnimatePillars();
+
+        if (DISPLAYLOSTANIMATION) {
+            let intervalLost = setInterval(() => {
+                if (refThis.bird.y > CANVASHEIGHT) {
+                    clearInterval(intervalLost);
+                    if (!refThis.resetted) {
+                        refThis.reset();
+                    }
+                }
+                this.bird.y += 1;
+            }, 10);
+        } else {
+            this.reset();
+        }
     }
     handleBirdTouchPillars() {
         setInterval(() => {
@@ -323,18 +378,21 @@ class Game {
 				}
 				this.updateTextScore();
 				if (this.bird.y + this.bird.width <= firstPillar.yTop || this.bird.y + this.bird.width >= firstPillar.yTop + SIZEPASSAGE) {
-                    alert("Percuté un mur");
-					this.reset();
-                } else if (this.bird.y <= firstPillar.yTop || this.bird.y + this.bird.height >= firstPillar.yTop + SIZEPASSAGE) {
-                    alert("Vous vous êtes posé");
-					this.reset();
+                    // alert("Percuté un mur");
+					this.handleLost();
+                } else if (this.bird.y - this.bird.heightUp <= firstPillar.yTop) {
+                    // alert("Touché le top d'un poto");
+					this.handleLost();
+                } else if (this.bird.y + this.bird.heightDown >= firstPillar.yTop + SIZEPASSAGE) {
+                    // alert("Touché le bottom d'un poto");
+					this.handleLost();
                 }
             }
         }, 50);
     }
     handleRemovePillars() {
         setInterval(() => {
-            if (this.pillars.getFirst().x <= -PILLARWIDTH) {
+            if (this.pillars.getFirst().x <= -PILLARWIDTH * PILLARSCALE) {
                 // this.konvaHandler.removePillars(this.pillars.getfirst());
                 this.pillars.removeFirst();
 				this.scoreUpdated = false;
